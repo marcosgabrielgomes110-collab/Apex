@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import inspect
 import json
-import hashlib
 from typing import Any, get_type_hints
 
-from ..configs import get_cache_path
+from ..configs import Cache
 
 # ── registro global ───────────────────────────────────────────
 _registry: dict[str, dict] = {}
-_cache_dir = get_cache_path("tools")
+_cache = Cache("tools")
 
 
 def tool(info: str = ""):
@@ -92,22 +91,9 @@ schemas_gemini = sch_gem
 all = sch
 
 
-# ── cache ─────────────────────────────────────────────────────
-
-def _cache_key(name: str, args: dict) -> str:
-    raw = f"{name}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:24]
-
-
-def _cache_file(key: str) -> str:
-    return str(_cache_dir / key)
-
-
 def cache_clear():
     """Limpa o cache de resultados das tools."""
-    for p in _cache_dir.iterdir():
-        if p.is_file():
-            p.unlink()
+    _cache.clear()
 
 
 # ── execução (nomes curtos) ───────────────────────────────────
@@ -120,7 +106,7 @@ def exec(response, use_cache: bool = False) -> list[dict]:
 def exec_tc(tool_calls: list, use_cache: bool = False) -> list[dict]:
     """Executa uma lista de ToolCall objects.
 
-    use_cache=True salva resultados em .PyramCache/tools/.
+    use_cache=True salva/recupera resultados em .PyramCache/tools/.
     """
     results = []
     for tc in tool_calls:
@@ -131,17 +117,11 @@ def exec_tc(tool_calls: list, use_cache: bool = False) -> list[dict]:
 
         args = json.loads(tc.arguments) if tc.arguments else {}
 
-        # cache hit
         if use_cache:
-            ck = _cache_key(tc.name, args)
-            cf = _cache_file(ck)
-            try:
-                with open(cf) as f:
-                    cached = json.load(f)
-                    results.append({"tool_call_id": tc.id, "name": tc.name, **cached})
-                    continue
-            except (FileNotFoundError, json.JSONDecodeError):
-                pass
+            cached = _cache.get(args, key_prefix=tc.name)
+            if cached is not None:
+                results.append({"tool_call_id": tc.id, "name": tc.name, **cached})
+                continue
 
         try:
             sig = inspect.signature(entry["fn"])
@@ -150,10 +130,7 @@ def exec_tc(tool_calls: list, use_cache: bool = False) -> list[dict]:
             content = json.dumps(output, ensure_ascii=False)
 
             if use_cache:
-                ck = _cache_key(tc.name, args)
-                cf = _cache_file(ck)
-                with open(cf, "w") as f:
-                    json.dump({"content": content}, f, ensure_ascii=False)
+                _cache.set(args, {"content": content}, key_prefix=tc.name)
 
             results.append({"tool_call_id": tc.id, "name": tc.name, "content": content})
         except Exception as e:

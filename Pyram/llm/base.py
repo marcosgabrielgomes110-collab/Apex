@@ -1,11 +1,9 @@
 from __future__ import annotations
 import json
-import hashlib
-from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..configs import get_cache_path
+from ..configs import Cache
 
 
 @dataclass
@@ -246,33 +244,8 @@ def convert_tool_choice_cohere(choice: str | dict | None) -> str | None:
     return None
 
 
-class ResponseCache:
-    """Cache de respostas baseado em hash dos payloads, armazenado em .PyramCache."""
+class ResponseCache(Cache):
+    """Cache de respostas LLM. Wrapper de Cache com namespace 'responses/{provider}'."""
 
     def __init__(self, provider: str, ttl: int = 3600):
-        self._dir = get_cache_path("responses", provider)
-        self._ttl = ttl
-
-    def _key(self, payload: dict) -> str:
-        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-        return hashlib.sha256(raw.encode()).hexdigest()[:24]
-
-    def get(self, payload: dict) -> dict | None:
-        path = self._dir / self._key(payload)
-        if not path.exists():
-            return None
-        if self._ttl > 0:
-            age = __import__("time").time() - path.stat().st_mtime
-            if age > self._ttl:
-                path.unlink(missing_ok=True)
-                return None
-        return json.loads(path.read_text())
-
-    def set(self, payload: dict, response: dict) -> None:
-        path = self._dir / self._key(payload)
-        path.write_text(json.dumps(response, ensure_ascii=False, indent=2))
-
-    def clear(self) -> None:
-        for p in self._dir.iterdir():
-            if p.is_file():
-                p.unlink()
+        super().__init__(f"responses/{provider}", ttl=ttl)
