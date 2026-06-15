@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from typing import Generator
+
 import httpx
 
-from .base import CompletionResponse, ToolCall, ToolResult, convert_tools_anthropic, convert_tool_choice_anthropic
+from .base import CompletionResponse, StreamChunk, ToolCall, ToolResult, convert_tools_anthropic, convert_tool_choice_anthropic, _sse_chunks
 
 
 class AnthropicResponse(CompletionResponse):
@@ -56,6 +58,7 @@ class Anthropic:
         tools: list[dict] | None = None,
         tool_choice: str | dict | None = None,
         messages: list[dict] | None = None,
+        stream: bool = False,
     ):
         headers = {
             "Content-Type": "application/json",
@@ -88,6 +91,10 @@ class Anthropic:
         if system:
             payload["system"] = system
 
+        if stream:
+            payload["stream"] = True
+            return self._stream(payload, headers)
+
         response = httpx.post(
             f"{self.base_url}/v1/messages",
             headers=headers,
@@ -97,6 +104,74 @@ class Anthropic:
 
         raw = response.json()
         return AnthropicResponse(raw, self.thinking)
+
+    def _stream(self, payload: dict, headers: dict) -> Generator[StreamChunk, None, None]:
+        url = f"{self.base_url}/v1/messages"
+        # estado para blocos de conteúdo incremental
+        blocks: dict[int, dict] = {}
+        finish_reason: str | None = None
+
+        with httpx.Client() as client:
+            with client.stream("POST", url, headers=headers, json=payload, timeout=120) as resp:
+                for event_type, data in _sse_chunks(resp):
+                    chunk = self._parse_chunk(event_type, data, blocks, finish_reason)
+                    if chunk:
+                        yield chunk
+
+    def _parse_chunk(
+        self, event_type: str | None, data: dict, blocks: dict[int, dict],
+        finish_reason: str | None
+    ) -> StreamChunk | None:
+        if event_type == "content_block_start":
+            idx = data.get("index", 0)
+            block = data.get("content_block", {})
+            blocks[idx] = {"type": block.get("type", ""), "text": "", "thinking": ""}
+            if block.get("type") == "tool_use":
+                blocks[idx].update({
+                    "id": block.get("id", ""),
+                    "name": block.get("name", ""),
+                    "input": block.get("input", ""),
+                })
+            return None
+
+        if event_type == "content_block_delta":
+            idx = data.get("index", 0)
+            delta = data.get("delta", {})
+            dtype = delta.get("type", "")
+            if idx not in blocks:
+                return None
+            if dtype == "text_delta":
+                blocks[idx]["text"] += delta.get("text", "")
+                text = delta.get("text", "")
+                return StreamChunk(content=text)
+            if dtype == "thinking_delta":
+                blocks[idx]["thinking"] += delta.get("thinking", "")
+                return StreamChunk(thinking=delta.get("thinking", ""))
+            return None
+
+        if event_type == "content_block_stop":
+            idx = data.get("index", 0)
+            block = blocks.get(idx, {})
+            if block.get("type") == "tool_use" and block.get("name"):
+                tc = ToolCall(
+                    id=block.get("id", ""),
+                    type="tool_use",
+                    name=block.get("name", ""),
+                    arguments=json.dumps(block.get("input", {}), ensure_ascii=False),
+                )
+                return StreamChunk(tool_calls=[tc])
+            return None
+
+        if event_type == "message_delta":
+            delta = data.get("delta", {})
+            fr = delta.get("stop_reason")
+            # fr pode ser "end_turn", "max_tokens", "stop_sequence", "tool_use"
+            return StreamChunk(done=True, finish_reason=fr)
+
+        if event_type == "message_stop":
+            return None  # já sinalizado em message_delta
+
+        return None
 
 
 def _convert_messages_anthropic(messages: list[dict]) -> list[dict]:

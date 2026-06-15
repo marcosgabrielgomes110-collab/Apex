@@ -7,7 +7,7 @@ from .gemini_ import Gemini, GeminiResponse
 from .groq_ import Groq
 
 # Base utilities
-from .base import CompletionResponse, ToolCall, ToolResult, ResponseCache
+from .base import CompletionResponse, ToolCall, ToolResult, ResponseCache, StreamChunk
 
 __all__ = [
     "DeepSeek",
@@ -24,4 +24,5 @@ __all__ = [
     "CompletionResponse",
     "ToolCall",
     "ToolResult",
+    "StreamChunk",
 ]

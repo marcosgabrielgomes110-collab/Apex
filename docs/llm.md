@@ -198,6 +198,43 @@ resp = ia.completetion("Traduza para português")
 
 ---
 
+## 🌊 Streaming
+
+Todos os provedores suportam streaming com `stream=True`. O método retorna um `Generator[StreamChunk]`:
+
+```python
+from Pyram.llm import DeepSeek, StreamChunk
+
+ia = DeepSeek(api_key="sk-...")
+
+stream = ia.completetion("Conte uma história curta", stream=True)
+
+for chunk in stream:
+    if chunk.content:
+        print(chunk.content, end="", flush=True)
+    if chunk.thinking:
+        print(f"[pensando: {chunk.thinking}]")
+    if chunk.tool_calls:
+        for tc in chunk.tool_calls:
+            print(f"[tool: {tc.name}({tc.arguments})]")
+    if chunk.done:
+        print(f"\n[finalizado: {chunk.finish_reason}]")
+```
+
+### StreamChunk
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `.content` | `str` | Texto gerado incrementalmente |
+| `.thinking` | `str` | Raciocínio interno (se disponível) |
+| `.tool_calls` | `list[ToolCall] \| None` | Chamadas de ferramentas completas (no fim do stream) |
+| `.done` | `bool` | `True` quando a resposta terminou |
+| `.finish_reason` | `str \| None` | Motivo da finalização (`stop`, `length`, `tool_use`, etc.) |
+
+> **Nota:** Tool calls em streaming chegam no último chunk (quando `done=True`). O conteúdo de texto e ferramentas nunca aparecem no mesmo chunk.
+
+---
+
 ## 🔄 Tool Calling com LLM
 
 ```python

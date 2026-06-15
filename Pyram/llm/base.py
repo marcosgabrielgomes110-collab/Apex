@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Generator
 
 from ..configs import Cache
 
@@ -249,3 +250,74 @@ class ResponseCache(Cache):
 
     def __init__(self, provider: str, ttl: int = 3600):
         super().__init__(f"responses/{provider}", ttl=ttl)
+
+
+# ── Streaming ────────────────────────────────────────────────
+
+
+@dataclass
+class StreamChunk:
+    """Um fragmento incremental de resposta em streaming.
+
+    Uso:
+        for chunk in ia.completetion("hello", stream=True):
+            if chunk.content:
+                sys.stdout.write(chunk.content)
+            if chunk.tool_calls:
+                handle_tools(chunk.tool_calls)
+    """
+    content: str = ""
+    thinking: str = ""
+    tool_calls: list[ToolCall] | None = None
+    done: bool = False
+    finish_reason: str | None = None
+    usage: dict | None = None
+
+
+def _sse_chunks(stream, done_marker: str = "[DONE]"):
+    """Lê linhas SSE de uma stream httpx e yield (event_type, data_dict).
+
+    Each SSE event é:
+        data: {...json...}
+
+    Ou com event type:
+        event: content_block_delta
+        data: {...}
+
+    A linha vazia separa eventos.
+    """
+    event_type = None
+    data_parts = []
+
+    for line in stream.iter_lines():
+        line = line.strip()
+        if not line:
+            # fim do evento
+            if data_parts:
+                raw = "".join(data_parts)
+                if raw == done_marker:
+                    return
+                try:
+                    data = json.loads(raw)
+                    yield event_type, data
+                except json.JSONDecodeError:
+                    pass
+                event_type = None
+                data_parts = []
+            continue
+        if line.startswith("event: "):
+            event_type = line[7:]
+        elif line.startswith("event-type: "):
+            event_type = line[12:]
+        elif line.startswith("data: "):
+            data_parts.append(line[6:])
+
+    # último evento se não houve linha vazia
+    if data_parts:
+        raw = "".join(data_parts)
+        if raw != done_marker:
+            try:
+                data = json.loads(raw)
+                yield event_type, data
+            except json.JSONDecodeError:
+                pass

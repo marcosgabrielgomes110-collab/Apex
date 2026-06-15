@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from typing import Generator
+
 import httpx
-from .base import CompletionResponse, ToolCall, convert_tools_gemini, convert_tool_choice_gemini
+
+from .base import CompletionResponse, StreamChunk, ToolCall, convert_tools_gemini, convert_tool_choice_gemini, _sse_chunks
 
 
 class GeminiResponse(CompletionResponse):
@@ -49,6 +52,7 @@ class Gemini:
         tools: list[dict] | None = None,
         tool_choice: str | dict | None = None,
         messages: list[dict] | None = None,
+        stream: bool = False,
     ):
         headers = {
             "Content-Type": "application/json",
@@ -81,6 +85,9 @@ class Gemini:
         if tc:
             payload["toolConfig"] = tc
 
+        if stream:
+            return self._stream(payload, headers)
+
         response = httpx.post(
             f"{self.base_url}/models/{self.model}:generateContent",
             headers=headers,
@@ -90,6 +97,47 @@ class Gemini:
 
         raw = response.json()
         return GeminiResponse(raw, self.thinking)
+
+    def _stream(self, payload: dict, headers: dict) -> Generator[StreamChunk, None, None]:
+        url = f"{self.base_url}/models/{self.model}:streamGenerateContent"
+
+        with httpx.Client() as client:
+            with client.stream("POST", url, headers=headers, json=payload, timeout=120) as resp:
+                for _, data in _sse_chunks(resp):
+                    chunk = self._parse_chunk(data)
+                    if chunk:
+                        yield chunk
+
+    def _parse_chunk(self, data: dict) -> StreamChunk | None:
+        candidates = data.get("candidates")
+        if not candidates:
+            return None
+        c = candidates[0]
+        parts = c.get("content", {}).get("parts", [])
+
+        content = ""
+        tcs = None
+
+        for part in parts:
+            if "text" in part:
+                content += part["text"]
+            if "functionCall" in part:
+                fc = part["functionCall"]
+                tc = ToolCall.from_gemini(fc)
+                if tcs is None:
+                    tcs = []
+                tcs.append(tc)
+
+        finish = c.get("finishReason")
+        if content or tcs or finish:
+            return StreamChunk(
+                content=content,
+                tool_calls=tcs,
+                done=bool(finish),
+                finish_reason=finish,
+            )
+
+        return None
 
 
 def _convert_messages_gemini(messages: list[dict]) -> list[dict]:
