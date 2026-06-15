@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyram"
+version = "0.1.0"
+description = "Motor de workflows e LLM calling — DAGs, tools, agentes"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["llm", "workflow", "dag", "agent", "tools"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "httpx>=0.27",
+]
+
+[project.urls]
+Homepage = "https://github.com/marcosgabrielgomes110-collab/Pyram"
+Repository = "https://github.com/marcosgabrielgomes110-collab/Pyram.git"
+
+[tool.setuptools.packages.find]
+include = ["Pyram*"]
+
+[tool.setuptools.package-data]
+"Pyram" = ["py.typed"]

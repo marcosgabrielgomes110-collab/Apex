@@ -7,8 +7,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Cache local no diretório de trabalho, igual __pycache__ / .pytest_cache
-CACHE_DIR = Path(os.getcwd()) / ".PyramCache"
+# Cache local — pode ser configurado via PYRAM_CACHE_DIR env var
+# Padrão: .PyramCache no diretório de trabalho (como __pycache__ / .pytest_cache)
+_CACHE_DIR_ENV = os.environ.get("PYRAM_CACHE_DIR")
+CACHE_DIR = Path(_CACHE_DIR_ENV) if _CACHE_DIR_ENV else Path(os.getcwd()) / ".PyramCache"
 
 
 def get_cache_path(*parts: str) -> Path:
