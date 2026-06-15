@@ -17,6 +17,7 @@
   <a href="docs/graph.md"><img src="https://img.shields.io/badge/docs-Graph%20Workflows-00C853?style=flat-square" alt="Graph Docs"></a>
   <a href="docs/examples.md"><img src="https://img.shields.io/badge/docs-Examples-FF4081?style=flat-square" alt="Examples"></a>
   <br>
+  <a href="https://pypi.org/project/pyram-flow/"><img src="https://img.shields.io/pypi/v/pyram-flow?style=flat-square&logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/dependencies-httpx%20only-orange?style=flat-square" alt="httpx only">
@@ -33,6 +34,10 @@
 ---
 
 ## 🚀 Quickstart
+
+```bash
+pip install pyram-flow
+```
 
 ```python
 # 1. LLM em 3 linhas

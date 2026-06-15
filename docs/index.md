@@ -49,7 +49,7 @@ Pyram/
 ## 🚀 Getting Started
 
 ```bash
-pip install httpx
+pip install pyram-flow
 ```
 
 ```python

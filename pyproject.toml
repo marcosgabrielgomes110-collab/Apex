@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pyram"
+name = "pyram-flow"
 version = "0.1.0"
 description = "Motor de workflows e LLM calling — DAGs, tools, agentes"
 readme = "README.md"
