@@ -17,7 +17,10 @@ class State:
             raise AttributeError(name)
         d = object.__getattribute__(self, "_data")
         if name not in d:
-            d[name] = {}
+            raise AttributeError(
+                f"State key '{name}' not found. Initialize it first, e.g.: "
+                f"flow.run(state={{{name!r}: ...}})"
+            )
         val = d[name]
         if isinstance(val, dict):
             return State(val)
@@ -31,6 +34,12 @@ class State:
         d = object.__getattribute__(self, "_data")
         if name in d:
             del d[name]
+
+    def __getitem__(self, key: str) -> Any:
+        return self.__getattr__(key)
+
+    def __setitem__(self, key: str, value) -> None:
+        self.__setattr__(key, value)
 
     def __bool__(self) -> bool:
         d = object.__getattribute__(self, "_data")
@@ -76,29 +85,22 @@ class State:
 class _StateProxy:
     """Proxy module-level que delega ao State ativo no ContextVar."""
 
-    def __getattr__(self, name: str) -> Any:
+    def _get(self) -> State:
         try:
-            st = _current.get()
+            return _current.get()
         except LookupError:
             st = State()
             _current.set(st)
-        return getattr(st, name)
+            return st
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get(), name)
 
     def __setattr__(self, name: str, value) -> None:
-        try:
-            st = _current.get()
-        except LookupError:
-            st = State()
-            _current.set(st)
-        setattr(st, name, value)
+        setattr(self._get(), name, value)
 
     def __delattr__(self, name: str) -> None:
-        try:
-            st = _current.get()
-        except LookupError:
-            st = State()
-            _current.set(st)
-        delattr(st, name)
+        delattr(self._get(), name)
 
     def __contains__(self, key: str) -> bool:
         try:

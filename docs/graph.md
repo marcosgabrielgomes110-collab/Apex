@@ -1,286 +1,254 @@
 <p align="center">
   <picture>
-    <img src="../images/PyramLogo.png" alt="Pyram Logo" width="120"/>
+    <img src="../images/Apex.png" alt="Apex Logo" width="100"/>
   </picture>
   <br>
-  <strong>Pyram.graph</strong> — Motor de Workflows: DAG, AST, @flow, @task
+  <strong>apex.graph</strong> — Motor de Workflows
 </p>
 
 ---
 
-## 📋 Conceitos
+> `apex.graph` é o núcleo do Apex. Transforma funções Python em DAGs via análise de AST e executa tasks com retry, timeout e paralelismo.
 
-| Conceito | O que é |
-|----------|---------|
-| **`@flow`** | Decorator que transforma uma função em workflow com detecção automática de DAG |
-| **`@task`** | Configura metadados de execução (retry, timeout, checkpoint, cache) |
-| **`state`** | State implícito via `contextvars` — acesse de qualquer função |
-| **`Flow.run()`** | Executa o DAG com checkpoint, cache e paralelismo |
-| **`Flow.viz()`** | Visualização ASCII do DAG |
-| **`Flow.viz_svg()`** | Exporta SVG do DAG |
+---
+
+## Índice
+
+- [Conceitos](#conceitos)
+- [`@flow` — o workflow](#flow--o-workflow)
+- [`state` — estado implícito](#state--estado-implícito)
+- [`@task` — configuração de execução](#task--configuração-de-execução)
+- [Condicionais (if/else)](#condicionais-ifelse)
+- [Loops (while)](#loops-while)
+- [Paralelismo](#paralelismo)
+- [Subflows](#subflows)
+- [Visualização](#visualização)
+- [Tratamento de erros](#tratamento-de-erros)
+- [Referência da API](#referência-da-api)
+
+---
+
+## Conceitos
+
+| Conceito | Descrição |
+|----------|-----------|
+| **`@flow`** | Decorator que analisa o AST e constrói um DAG automaticamente |
+| **`@task`** | Configura `retry` e `timeout` em tasks |
+| **`state`** | Estado global implícito via `contextvars`. Thread-safe. |
+| **`Flow.run()`** | Executa o DAG com paralelismo |
+| **`Flow.viz()`** | Visualiza em ASCII, SVG, Mermaid, HTML ou PNG |
 | **`parallel()`** | Context manager para paralelismo explícito |
 
 ---
 
-## 🎬 `@flow`
+## `@flow` — o workflow
 
 ```python
-from Pyram.graph import flow, state
+from apex.graph import flow, state
 
-# Cada chamada de função vira um nó no DAG
+def classificar():
+    state.intencao = "compra"
+
+def buscar():
+    state.resultados = ["item A", "item B"]
+
 @flow
 def chatbot():
-    classificar()     # nó 1
-    buscar_dados()    # nó 2
-    responder()       # nó 3
+    classificar()
+    buscar()
 
-# Executa o workflow
-resultado = chatbot.run(state={"input": "quero um notebook"})
-print(resultado.to_dict())
-
-# Visualiza o DAG
+chatbot.run()
 print(chatbot.viz())
-# classificar
-# ├── buscar_dados
-# │   └── responder
+```
+
+### `Flow.run(state, **kwargs)`
+
+```python
+# Via dict
+meu_flow.run(state={"inicial": "valor"})
+
+# Via kwargs (injetados no state)
+meu_flow.run(inicial="valor", debug=True)
 ```
 
 ---
 
-## 🧠 `state` implícito
-
-O state é **global por execução** — acesse e modifique de qualquer lugar:
+## `state` — estado implícito
 
 ```python
-from Pyram.graph import flow, state
+from apex.graph import flow, state
 
 def etapa1():
-    state.nome = "Pyram"
+    state.nome = "Apex"
     state.valor = 42
 
 def etapa2():
-    print(state.nome, state.valor)     # Pyram 42
-    state.nested = {"chave": "valor"}  # auto-cria dicts aninhados
+    state.valor *= 2
 
 @flow
-def demo():
+def pipeline():
     etapa1()
     etapa2()
 
-result = demo.run()
-print(result.nested)   # {'chave': 'valor'}
+resultado = pipeline.run()
+print(resultado.valor)  # 84
 ```
 
-> O state usa `contextvars.ContextVar` — cada chamada de `flow.run()` tem seu state isolado. Thread-safe.
-
-### Métodos do State
-
-```python
-result.to_dict()        # → dict puro
-result.copy()           # → deep copy
-"key" in result         # → True/False
-bool(result)            # → True se não vazio
-len(result)             # → número de chaves
-```
+| Operação | Comportamento |
+|----------|---------------|
+| `state.chave = valor` | Escreve |
+| `state.chave` | Lê (levanta `AttributeError` se ausente) |
+| `del state.chave` | Remove |
+| `"chave" in state` | Verifica |
+| `resultado.to_dict()` | Converte para dict |
+| `resultado.copy()` | Deep copy |
 
 ---
 
-## ⚙️ `@task` — Configuração
+## `@task` — configuração
 
 ```python
-from Pyram.graph import task
+from apex.graph import task
 
-@task(retry=3)                     # 3 tentativas com backoff exponencial
-def operacao_instavel():
-    import random
+@task(retry=3)
+def instavel():
     if random.random() < 0.5:
         raise RuntimeError("falha")
     state.ok = True
 
-@task(timeout=30)                  # timeout de 30s
-@task(checkpoint=True)             # salva checkpoint após execução
-@task(cache=True)                  # cache por hash dos argumentos
-
-@task(retry=3, timeout=10, checkpoint=True, cache=True)
-def pagamento():
-    state.status = processar_pagamento(state.order)
+@task(timeout=30)
+def lenta():
+    time.sleep(10)
 ```
-
-### Parâmetros
 
 | Parâmetro | Padrão | Descrição |
 |-----------|--------|-----------|
-| `retry` | `0` | Número de tentativas extras (backoff exponencial 2^n) |
+| `retry` | `0` | Tentativas extras com backoff exponencial |
 | `timeout` | `0` | Timeout em segundos (0 = sem timeout) |
-| `checkpoint` | `False` | Salva state após execução (permite recovery) |
-| `cache` | `False` | Cache por hash de args (pula re-execução) |
+
+O valor de retorno da task é mergido no state como `state.nome_da_task`:
+
+```python
+@task()
+def calcular():
+    return 42
+
+# resultado.calcular == 42
+```
 
 ---
 
-## 🔀 Condicionais
-
-`if/else` são detectados automaticamente pelo AST e viram nós condicionais:
+## Condicionais (if/else)
 
 ```python
 @flow
 def roteador():
     classificar()
-    if state.intent == "compra":
+    if state.intencao == "compra":
         produtos()
     else:
         suporte()
-    finalizar()  # nó merge implícito
-
-print(roteador.viz())
-# classificar
-# └── ? state.intent == 'compra'
-#     ├── produtos
-#     │   └── merge
-#     └── suporte
-#         └── [merge...]
 ```
 
-> O ramo não executado é **bloqueado** (não executa). O merge implícito garante que o fluxo se reúna.
+```
+classificar
+└── ? state.intencao == 'compra'
+    ├── produtos
+    │   └── merge
+    └── suporte
+        └── [merge...]
+```
 
 ---
 
-## 🔄 Loops
+## Loops (while)
 
 ```python
 @flow
 def agente():
-    while not state.finished:
+    while not state.finalizado:
         pensar()
         agir()
-
-result = agente.run(state={"finished": False, "count": 0})
-# pensar → agir → pensar → agir → ... até state.finished = True
-
-print(agente.viz())
-# ↻ not state.finished
-# └── pensar
-#     └── agir
 ```
 
-> Limite de segurança: 100 iterações. Back-edge é automaticamente detectada e ignorada no topological sort.
+Limite de segurança: **100 iterações**.
 
 ---
 
-## ⚡ Paralelismo
+## Paralelismo
 
-### Implícito (fork automático)
-
-Tarefas consecutivas que **não dependem umas das outras** executam em paralelo:
+Tasks consecutivas sem dependência rodam em paralelo automaticamente:
 
 ```python
 @flow
 def pedido():
-    verificar_pagamento()   # ← roda em paralelo
-    verificar_estoque()     # ← roda em paralelo
-    faturar()               # ← só executa após ambas
-
-print(pedido.viz())
-# verificar_pagamento
-# └── verificar_estoque
-#     └── faturar
+    verificar_pagamento()     # ← paralelo
+    verificar_estoque()       # ← paralelo
+    faturar()                 # ← aguarda ambos
 ```
 
-### Explícito com `with parallel()`
+Explícito com `with parallel()`:
 
 ```python
-from Pyram.graph import parallel
+from apex.graph import parallel
 
 @flow
-def busca_completa():
+def busca():
     with parallel():
         buscar_web()
         buscar_docs()
-        buscar_db()
     sintetizar()
 ```
 
 ---
 
-## 🧪 Checkpoint & Recovery
+## Subflows
 
 ```python
-@task(checkpoint=True)
-def etapa_critica():
-    state.dado = operacao_perigosa()
+@flow
+def validar():
+    state.pagamento_ok = True
 
 @flow
-def pipeline():
-    preparar()
-    etapa_critica()   # ← salva checkpoint
-    finalizar()
-
-# Se falhar na 2ª execução, retoma de etapa_critica
-pipeline.run(state={"progresso": 0})
-```
-
-Os checkpoints ficam em `.PyramCache/graph/{flow_name}/checkpoints/`.
-
----
-
-## 🎨 Visualização
-
-```python
-# ASCII
-print(chatbot.viz())
-# classificar
-# └── ? state.intent == 'compra'
-#     ├── produtos
-#     └── suporte
-
-# SVG
-chatbot.viz_svg("workflow.svg")
+def processar():
+    validar()
+    if state.pagamento_ok:
+        state.status = "aprovado"
 ```
 
 ---
 
-## 🧠 Exemplo: Agente ReAct
+## Visualização
+
+**5 formatos:**
 
 ```python
-from Pyram.graph import flow, task, state
-
-@task(retry=2)
-def pensar():
-    """LLM decide o que fazer"""
-    state.thought = llm(f"Contexto: {state.input}")
-    state.action = extrair_acao(state.thought)
-
-@task(retry=2, cache=True)
-def agir():
-    """Executa a ação decidida"""
-    state.result = executar_acao(state.action)
-
-@flow
-def react_agent():
-    while not state.concluido:
-        pensar()
-        if "final_answer" in state.action:
-            state.concluido = True
-        else:
-            agir()
-
-resultado = react_agent.run(state={
-    "input": "Quanto é 25 * 4 + 10?",
-    "concluido": False,
-})
+flow.viz()                    # ASCII (padrão)
+flow.viz("svg", path="f.svg") # SVG
+flow.viz("mermaid")           # Mermaid (Markdown)
+flow.viz("html", path="f.html") # HTML interativo
+flow.viz("png", path="f.png")   # PNG (requer cairosvg)
 ```
 
 ---
 
-## 💾 Cache de tasks
+## Tratamento de erros
 
-```python
-@task(cache=True)
-def consulta_api():
-    state.dados = chamada_externa()
-
-# Na segunda execução com mesmos inputs, pula a task
-flow.run(state={"param": "x"})
-flow.run(state={"param": "x"})  # task consulta_api → cache hit
+```
+RuntimeError: Task [flow.task] falhou: ValueError: mensagem
 ```
 
-O cache usa SHA256 do nome da task + estado atual, armazenado em `.PyramCache/graph/{flow_name}/cache/`.
+Debug de condições: `export PYRAM_DEBUG=1`
+
+---
+
+## Referência da API
+
+| Símbolo | Tipo | Descrição |
+|---------|------|-----------|
+| `flow` | decorator | `@flow` ou `@flow(name="x")` |
+| `Flow.run(state, **kwargs)` | método | Executa, retorna `State` |
+| `Flow.viz(fmt, path)` | método | Visualiza DAG |
+| `task` | decorator | `@task(retry=N, timeout=S)` |
+| `state` | proxy | State global implícito |
+| `parallel` | context | `with parallel(): ...` |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import textwrap
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -11,8 +12,6 @@ class NodeConfig:
     """Configuração opcional de task (decorator @task)."""
     retry: int = 0
     timeout: float = 0.0
-    checkpoint: bool = False
-    cache: bool = False
 
 
 @dataclass
@@ -76,6 +75,13 @@ class DAG:
                         next_queue.append(neighbor)
             queue = next_queue
 
+        remaining = [n for n, d in in_degree.items() if d > 0]
+        if remaining:
+            cycle_path = " -> ".join(remaining)
+            raise ValueError(
+                f"Cycle detected in flow! Nodes still with dependencies: {cycle_path}"
+            )
+
         return levels
 
 
@@ -92,9 +98,19 @@ class _BuildContext:
         return name
 
     def resolve(self, name: str) -> Callable | None:
-        for scope in [self.func.__globals__, getattr(self.func, '__globals__', {})]:
-            if name in scope:
-                return scope[name]
+        scope = getattr(self.func, '__globals__', {})
+        if name in scope:
+            return scope[name]
+        closure = getattr(self.func, '__closure__', None)
+        code = getattr(self.func, '__code__', None)
+        if closure and code:
+            freevars = code.co_freevars
+            for cell, var in zip(closure, freevars):
+                if var == name:
+                    try:
+                        return cell.cell_contents
+                    except ValueError:
+                        return None
         return None
 
     def node_by_name(self, name: str) -> Node | None:
@@ -107,6 +123,7 @@ def build_dag(func: Callable) -> DAG:
     except OSError:
         raise TypeError(f"Não foi possível obter código fonte de {func.__name__}")
 
+    src = textwrap.dedent(src)
     tree = ast.parse(src)
     fn_def = None
     for node in tree.body:
@@ -121,7 +138,13 @@ def build_dag(func: Callable) -> DAG:
 
     last, _ = _walk_body(fn_def.body, ctx, parent=None)
     if dag.nodes:
-        dag.entry = list(dag.nodes.keys())[0]
+        # entry = nó com in-degree 0 (verdadeira raiz do DAG)
+        indeg = {n: 0 for n in dag.nodes}
+        for e in dag.edges:
+            if not e.is_back_edge:
+                indeg[e.target] = indeg.get(e.target, 0) + 1
+        roots = [n for n, d in indeg.items() if d == 0]
+        dag.entry = roots[0] if roots else list(dag.nodes.keys())[0]
 
     return dag
 
@@ -161,7 +184,10 @@ def _handle_call(call: ast.Call, ctx: _BuildContext, last: str | None) -> str:
 
     fn = ctx.resolve(name)
     if fn is None:
-        raise NameError(f"Task '{name}' não encontrada no escopo de {ctx.func.__name__}")
+        raise NameError(
+            f"Task '{name}' not found in scope of flow '{ctx.func.__name__}'. "
+            f"Ensure the function is defined at module level or in an enclosing scope."
+        )
 
     # detecta se é subflow
     flow_dag = getattr(fn, '_flow_dag', None)
@@ -173,8 +199,6 @@ def _handle_call(call: ast.Call, ctx: _BuildContext, last: str | None) -> str:
         config = NodeConfig(
             retry=tcfg.get("retry", 0),
             timeout=tcfg.get("timeout", 0.0),
-            checkpoint=tcfg.get("checkpoint", False),
-            cache=tcfg.get("cache", False),
         )
 
     node_name = ctx.unique_name(name)

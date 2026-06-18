@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from typing import Any, Callable
 
 from ._dag import DAG, Node, NodeConfig, build_dag
 from ._state import State, _set_state, _get_state
-from ._checkpoint import CheckpointManager
 
 MAX_LOOP_ITERATIONS = 100
 
@@ -45,28 +46,39 @@ class Flow:
 
     def run(self, state: dict | None = None, **kwargs) -> State:
         dag = self._ensure_dag()
+        if isinstance(state, State):
+            st = state
+        else:
+            data = dict(state or {})
+            data.update(kwargs)
+            st = State(data)
+
+        _set_state(st)
+
         if not dag.nodes:
-            st = State(state or {})
-            _set_state(st)
             self._func()
             return _get_state()
 
-        st = State(state or {})
-        _set_state(st)
-
-        cpm = CheckpointManager(self._name)
-        scheduler = _Scheduler(dag, st, cpm, self._name)
+        scheduler = _Scheduler(dag, st)
         scheduler.run()
 
         return _get_state()
 
-    def viz(self, fmt: str = "ascii") -> str:
-        from ._viz import ascii_tree
-        return ascii_tree(self._ensure_dag())
+    def viz(self, fmt: str = "ascii", path: str | None = None):
+        from ._viz import render
+        return render(self._ensure_dag(), fmt=fmt, path=path)
 
     def viz_svg(self, path: str) -> None:
-        from ._viz import export_svg
-        export_svg(self._ensure_dag(), path)
+        self.viz(fmt="svg", path=path)
+
+    def viz_mermaid(self) -> str:
+        return self.viz(fmt="mermaid")
+
+    def viz_html(self, path: str) -> None:
+        self.viz(fmt="html", path=path)
+
+    def viz_png(self, path: str) -> None:
+        self.viz(fmt="png", path=path)
 
     def map(self) -> DAG:
         return self._ensure_dag()
@@ -79,16 +91,13 @@ class Flow:
 
 
 class _Scheduler:
-    def __init__(self, dag: DAG, state: State, cpm: CheckpointManager, flow_name: str):
+    def __init__(self, dag: DAG, state: State):
         self._dag = dag
         self._state = state
-        self._cpm = cpm
-        self._flow_name = flow_name
         self._executed: set[str] = set()
         self._blocked: set[str] = set()
 
     def run(self) -> None:
-        manifest = self._cpm.load_manifest()
         levels = self._dag._levels()
 
         for level in levels:
@@ -98,21 +107,21 @@ class _Scheduler:
                     continue
                 node = self._dag.nodes[node_name]
                 if node.kind == "conditional":
-                    self._run_conditional(node, manifest)
+                    self._run_conditional(node)
                 elif node.kind == "loop":
-                    self._run_loop(node, manifest)
+                    self._run_loop(node)
                 elif node.kind == "parallel":
-                    self._run_parallel(node, manifest)
+                    self._run_parallel(node)
                 elif node.fn is not None:
                     parallel_group.append(node_name)
 
             if parallel_group:
                 if len(parallel_group) == 1:
-                    self._run_node(parallel_group[0], manifest)
+                    self._run_node(parallel_group[0])
                 else:
-                    self._run_parallel_group(parallel_group, manifest)
+                    self._run_parallel_group(parallel_group)
 
-    def _run_node(self, node_name: str, manifest: list[str]) -> None:
+    def _run_node(self, node_name: str) -> None:
         if node_name in self._executed or node_name in self._blocked:
             return
 
@@ -121,64 +130,59 @@ class _Scheduler:
             self._executed.add(node_name)
             return
 
-        if node_name in manifest:
-            self._executed.add(node_name)
-            return
-
         config = node.config or NodeConfig()
 
-        if config.checkpoint:
-            saved = self._cpm.load(node_name)
-            if saved:
-                st = State.from_dict(saved)
-                _set_state(st)
-                self._state = st
-                manifest.append(node_name)
-                self._cpm.save_manifest(manifest)
-                self._executed.add(node_name)
-                return
-
-        if config.cache:
-            cached = self._cpm.cache_get(node_name, self._state.to_dict())
-            if cached is not None:
-                self._executed.add(node_name)
-                return
+        def _run():
+            _set_state(self._state)
+            try:
+                if node.kind == "subflow":
+                    return node.fn(state=self._state)
+                return node.fn()
+            finally:
+                self._state = _get_state()
 
         last_exc = None
+        return_value = None
+        flow_tag = f"[{self._dag.entry}.{node_name}]"
         for attempt in range(config.retry + 1):
             try:
-                _set_state(self._state)
-                result = node.fn()
-                self._state = _get_state()
+                if config.timeout > 0:
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(_run)
+                        return_value = future.result(timeout=config.timeout)
+                else:
+                    return_value = _run()
                 break
             except (FuturesTimeoutError, TimeoutError):
-                last_exc = TimeoutError(f"Task '{node_name}' excedeu timeout de {config.timeout}s")
+                msg = f"Task {flow_tag} excedeu timeout de {config.timeout}s"
+                last_exc = TimeoutError(msg)
                 if attempt == config.retry:
                     raise last_exc
                 time.sleep(2 ** attempt)
+
             except Exception as e:
-                last_exc = e
+                last_exc = RuntimeError(
+                    f"Task {flow_tag} falhou: {type(e).__name__}: {e}"
+                )
                 if attempt == config.retry:
-                    raise
+                    raise last_exc
                 time.sleep(2 ** attempt)
+
+        if return_value is not None:
+            name_key = node_name.rsplit("_", 1)[0] if node_name[-1].isdigit() else node_name
+            self._state = _get_state()
+            setattr(self._state, name_key, return_value)
+            _set_state(self._state)
 
         self._executed.add(node_name)
 
-        if config.checkpoint:
-            self._cpm.save(node_name, self._state.to_dict())
-            manifest.append(node_name)
-            self._cpm.save_manifest(manifest)
-
-        if config.cache:
-            self._cpm.cache_set(node_name, self._state.to_dict(), True)
-
-    def _run_parallel_group(self, node_names: list[str], manifest: list[str]) -> None:
+    def _run_parallel_group(self, node_names: list[str]) -> None:
         with ThreadPoolExecutor(max_workers=len(node_names)) as executor:
-            futures = {executor.submit(self._run_node, n, manifest): n for n in node_names}
+            futures = {executor.submit(self._run_node, n): n for n in node_names}
             for future in as_completed(futures):
                 future.result()
 
-    def _run_conditional(self, node: Node, manifest: list[str]) -> None:
+    def _run_conditional(self, node: Node) -> None:
         cond = node.condition or "True"
         result = self._evaluate(cond)
 
@@ -192,11 +196,11 @@ class _Scheduler:
         for child in skipped:
             self._blocked.add(child)
         for child in taken:
-            self._run_node(child, manifest)
+            self._run_node(child)
 
         self._executed.add(node.name)
 
-    def _run_loop(self, node: Node, manifest: list[str]) -> None:
+    def _run_loop(self, node: Node) -> None:
         iteration = 0
         while self._evaluate(node.condition or "True"):
             if iteration >= MAX_LOOP_ITERATIONS:
@@ -207,10 +211,8 @@ class _Scheduler:
                 if child in self._blocked:
                     continue
                 self._executed.discard(child)
-                self._run_node(child, manifest)
-                self._executed.discard(child)
+                self._run_node(child)
             iteration += 1
-        # mantém body nodes como executados para o scheduler topológico não re-executar
         for child in node.body_nodes:
             self._executed.add(child)
         self._executed.add(node.name)
@@ -219,17 +221,20 @@ class _Scheduler:
         import builtins as _blt
         st = self._state
         d = st.to_dict()
-        # snapshot somente-leitura — evita que eval dispare __getattr__ e crie atributos
         ns = {"state": _EvalProxy(d), "__builtins__": _blt}
         try:
             return bool(eval(condition, ns, {}))
-        except Exception:
+        except Exception as exc:
+            if os.environ.get("PYRAM_DEBUG"):
+                warnings.warn(
+                    f"Condition eval failed: {condition!r} -> {type(exc).__name__}: {exc}"
+                )
             return False
 
-    def _run_parallel(self, node: Node, manifest: list[str]) -> None:
+    def _run_parallel(self, node: Node) -> None:
         if node.body_nodes:
             with ThreadPoolExecutor(max_workers=len(node.body_nodes)) as executor:
-                futures = {executor.submit(self._run_node, n, manifest): n for n in node.body_nodes}
+                futures = {executor.submit(self._run_node, n): n for n in node.body_nodes}
                 for future in as_completed(futures):
                     future.result()
         self._executed.add(node.name)
@@ -249,11 +254,11 @@ def flow(func=None, *, name=None):
     return lambda f: Flow(f, name=name or f.__name__)
 
 
-def task(*, retry: int = 0, timeout: float = 0, checkpoint: bool = False, cache: bool = False):
+def task(*, retry: int = 0, timeout: float = 0):
     """Configura metadados de uma task.
 
     Uso:
-        @task(retry=3, timeout=30, checkpoint=True, cache=True)
+        @task(retry=3, timeout=30)
         def minha_task():
             ...
     """
@@ -261,14 +266,12 @@ def task(*, retry: int = 0, timeout: float = 0, checkpoint: bool = False, cache:
         fn.__task_config__ = {
             "retry": retry,
             "timeout": timeout,
-            "checkpoint": checkpoint,
-            "cache": cache,
         }
         return fn
     return decorator
 
 
-def parallel():
+class _ParallelContext:
     """Context manager para execução paralela explícita.
 
     Uso:
@@ -277,8 +280,11 @@ def parallel():
             docs()
             db()
     """
-    from contextlib import contextmanager
-    @contextmanager
-    def _ctx():
-        yield
-    return _ctx()
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+parallel = _ParallelContext
