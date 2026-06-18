@@ -40,7 +40,7 @@ meu_workflow.run(state={"chave": "valor"})
 ## Quick Start
 
 ```bash
-pip install apex-flow
+pip install apex-taskflow
 ```
 
 ```python
