@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-sys.path.insert(0, ".")
-
 from apex.graph._dag import DAG, Node, Edge, NodeConfig, build_dag
 from apex.graph._scheduler import Flow
 

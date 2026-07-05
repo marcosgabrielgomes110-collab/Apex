@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-sys.path.insert(0, ".")
-
 from apex.graph._dag import DAG, Node
 from apex.graph._viz import (
     ascii_tree, export_svg, export_mermaid, export_html,

@@ -9,8 +9,10 @@ ROW_GAP = 24
 
 
 def _label(node):
-    label_parts = node.name.rsplit("_", 1)
-    label = label_parts[0] if len(label_parts) == 2 and label_parts[1].isdigit() else node.name
+    if node.fn and hasattr(node.fn, '__name__'):
+        label = node.fn.__name__
+    else:
+        label = node.name.rsplit("_", 1)[0] if "_" in node.name else node.name
     if node.kind == "conditional":
         return f"? {node.condition or ''}"
     elif node.kind == "loop":

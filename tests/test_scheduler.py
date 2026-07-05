@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-sys.path.insert(0, ".")
-
 import time
 import threading
 from apex.graph._scheduler import Flow, flow, task, parallel

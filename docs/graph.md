@@ -238,7 +238,7 @@ flow.viz("png", path="f.png")   # PNG (requer cairosvg)
 RuntimeError: Task [flow.task] falhou: ValueError: mensagem
 ```
 
-Debug de condições: `export PYRAM_DEBUG=1`
+Debug de condições: `export APEX_DEBUG=1`
 
 ---
 

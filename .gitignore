@@ -5,6 +5,8 @@ __pycache__/
 .*
 # C extensions
 *.so
+token.md
+pyram_chatbot.svg
 
 # Distribution / packaging
 .Python

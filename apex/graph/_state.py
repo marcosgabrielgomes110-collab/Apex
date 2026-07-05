@@ -35,11 +35,21 @@ class State:
         if name in d:
             del d[name]
 
+    def get(self, key: str, default: Any = None) -> Any:
+        d = object.__getattribute__(self, "_data")
+        val = d.get(key, default)
+        if isinstance(val, dict) and val is not default:
+            return State(val)
+        return val
+
     def __getitem__(self, key: str) -> Any:
         return self.__getattr__(key)
 
     def __setitem__(self, key: str, value) -> None:
         self.__setattr__(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        self.__delattr__(key)
 
     def __bool__(self) -> bool:
         d = object.__getattribute__(self, "_data")
@@ -101,6 +111,13 @@ class _StateProxy:
 
     def __delattr__(self, name: str) -> None:
         delattr(self._get(), name)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            st = _current.get()
+        except LookupError:
+            return default
+        return st.get(key, default)
 
     def __contains__(self, key: str) -> bool:
         try:

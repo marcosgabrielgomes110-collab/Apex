@@ -168,19 +168,45 @@ class _Scheduler:
                     raise last_exc
                 time.sleep(2 ** attempt)
 
-        if return_value is not None:
-            name_key = node_name.rsplit("_", 1)[0] if node_name[-1].isdigit() else node_name
+        if return_value is not None and node.fn is not None and node.kind != "subflow":
             self._state = _get_state()
-            setattr(self._state, name_key, return_value)
+            func_name = getattr(node.fn, '__name__', node.name.rsplit("_", 1)[0] if "_" in node.name else node.name)
+            setattr(self._state, func_name, return_value)
             _set_state(self._state)
 
         self._executed.add(node_name)
 
+    def _run_isolated(self, node_name: str, snapshot: State) -> State:
+        saved = self._state
+        self._state = snapshot
+        _set_state(snapshot)
+        try:
+            self._run_node(node_name)
+            return self._state
+        finally:
+            self._state = saved
+            _set_state(saved)
+
     def _run_parallel_group(self, node_names: list[str]) -> None:
+        import threading as _th
+        snapshots: list[State] = []
+        lock = _th.Lock()
+
+        def _run_and_store(node_name):
+            snap = self._state.copy()
+            result = self._run_isolated(node_name, snap)
+            with lock:
+                snapshots.append(result)
+
         with ThreadPoolExecutor(max_workers=len(node_names)) as executor:
-            futures = {executor.submit(self._run_node, n): n for n in node_names}
+            futures = [executor.submit(_run_and_store, n) for n in node_names]
             for future in as_completed(futures):
                 future.result()
+
+        for snap in snapshots:
+            for k, v in snap.to_dict().items():
+                if k not in self._state:
+                    setattr(self._state, k, v)
 
     def _run_conditional(self, node: Node) -> None:
         cond = node.condition or "True"
@@ -225,7 +251,7 @@ class _Scheduler:
         try:
             return bool(eval(condition, ns, {}))
         except Exception as exc:
-            if os.environ.get("PYRAM_DEBUG"):
+            if os.environ.get("APEX_DEBUG"):
                 warnings.warn(
                     f"Condition eval failed: {condition!r} -> {type(exc).__name__}: {exc}"
                 )
@@ -233,10 +259,26 @@ class _Scheduler:
 
     def _run_parallel(self, node: Node) -> None:
         if node.body_nodes:
+            import threading as _th
+            snapshots: list[State] = []
+            lock = _th.Lock()
+
+            def _run_and_store(node_name):
+                snap = self._state.copy()
+                result = self._run_isolated(node_name, snap)
+                with lock:
+                    snapshots.append(result)
+
             with ThreadPoolExecutor(max_workers=len(node.body_nodes)) as executor:
-                futures = {executor.submit(self._run_node, n): n for n in node.body_nodes}
+                futures = [executor.submit(_run_and_store, n) for n in node.body_nodes]
                 for future in as_completed(futures):
                     future.result()
+
+            for snap in snapshots:
+                for k, v in snap.to_dict().items():
+                    if k not in self._state:
+                        self._state._data[k] = v
+
         self._executed.add(node.name)
 
 

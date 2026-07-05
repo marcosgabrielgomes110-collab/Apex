@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-sys.path.insert(0, ".")
-
 import threading
 from apex.graph._state import State, _StateProxy, _set_state, _get_state
 

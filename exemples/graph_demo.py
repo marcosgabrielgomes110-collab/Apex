@@ -1,4 +1,4 @@
-"""Demonstração do Pyram.graph — motor de workflows.
+"""Demonstração do Apex.graph — motor de workflows.
 
 Uso:
     python exemples/graph_demo.py
@@ -6,7 +6,7 @@ Uso:
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from Pyram.graph import flow, task, state, parallel
+from apex.graph import flow, task, state, parallel
 
 
 # ── 1. sequencial simples ────────────────────────────────────
