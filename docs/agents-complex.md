@@ -223,6 +223,7 @@ def validar_dados():
     if fonte == "cache":
         state.dados_validos = False
         state.motivo_rejeicao = "Cache pode estar desatualizado — usando mesmo assim"
+        state.dados_processados = dados.upper()
         return
 
     state.dados_validos = True
@@ -285,8 +286,8 @@ import os
 random.seed(42)
 
 for tentativa in range(3):
-    state._set_state(state.State({"concluido": False, "fonte_ativa": None}))
-    resultado = pipeline_adaptativo.run(concluido=False)
+    # cada run() começa com um state novo
+    resultado = pipeline_adaptativo.run(concluido=False, fonte_ativa=None)
     print(f"Tentativa {tentativa + 1}: fonte={resultado.get('fonte_ativa', 'N/A')}, "
           f"ok={resultado.get('concluido', False)}")
 ```

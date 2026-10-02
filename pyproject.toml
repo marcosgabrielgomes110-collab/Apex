@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apex-taskflow"
-version = "0.1.1"
+dynamic = ["version"]
 description = "Zero-dependency Python workflow engine — DAG, @flow, @task, state"
 readme = "README.md"
 license = {text = "MIT"}
@@ -35,11 +35,18 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+png = ["cairosvg>=2.7"]
+dev = ["pytest>=7", "pytest-cov>=4"]
+
 [project.urls]
 Homepage = "https://github.com/marcosgabrielgomes110-collab/Apex"
 Documentation = "https://github.com/marcosgabrielgomes110-collab/Apex"
 Repository = "https://github.com/marcosgabrielgomes110-collab/Apex"
 Issues = "https://github.com/marcosgabrielgomes110-collab/Apex/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "apex.__version__.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["apex*"]

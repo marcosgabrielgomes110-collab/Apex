@@ -72,8 +72,9 @@ def enviar_confirmacao():
 @flow
 def checkout():
     validar_carrinho()
-    processar_pagamento()    # ← paralelo
-    verificar_estoque()      # ← paralelo
+    with parallel():
+        processar_pagamento()    # branches isolados
+        verificar_estoque()
     if state.pago and state.estoque_ok:
         gerar_nota_fiscal()
         enviar_confirmacao()
@@ -143,6 +144,8 @@ print(resultado.acao_final)
 ### Paralelismo
 
 ```
-→ Nós no mesmo nível do topological sort → ThreadPoolExecutor
-→ with parallel(): → paralelismo explícito
+→ Chamadas consecutivas são encadeadas (ordem determinística)
+→ with parallel(): → cada statement vira um branch em thread própria
+→ Cada branch parte de um snapshot do state; merge ao final da barreira
+→ Uma chave por branch; conflito gera warning (o último vence)
 ```

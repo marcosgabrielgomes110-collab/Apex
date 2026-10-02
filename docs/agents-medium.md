@@ -67,8 +67,11 @@ def raciocinar():
     passo = len(state.historico)
     state.pensamento = f"Passo {passo}: analisando {state.objetivo}..."
 
-    # Lógica simples de decisão
-    if state.get("arquivo_alvo") and not state.get("conteudo"):
+    # Lógica simples de decisão — com limite de passos para o agente
+    # nunca travar num loop infinito quando uma tool falha
+    if passo >= 6:
+        state.proxima_acao = "responder"
+    elif state.get("arquivo_alvo") and not state.get("conteudo"):
         state.proxima_acao = "ler_arquivo"
     elif state.get("termo_busca") and not state.get("resultado_busca"):
         state.proxima_acao = "buscar_web"
@@ -127,9 +130,15 @@ def agente_react():
 
 # ── Execução ────────────────────────────────────────────────
 
+import pathlib, tempfile
+
+# arquivo de exemplo para a tool ler (o exemplo é autocontido)
+alvo = pathlib.Path(tempfile.gettempdir()) / "apex_config.txt"
+alvo.write_text("conteudo de exemplo\nlinha 2")
+
 resultado = agente_react.run(
-    objetivo="Ler o arquivo config.txt e processar seu conteúdo",
-    arquivo_alvo="config.txt",
+    objetivo="Ler o arquivo de configuração e processar seu conteúdo",
+    arquivo_alvo=str(alvo),
     historico=[],
     concluido=False,
 )
@@ -155,8 +164,9 @@ def buscar_api():
     """Busca em API externa"""
     import time
     time.sleep(0.1)  # simulando latência
+    # cada branch escreve uma chave própria: escrita concorrente na MESMA
+    # chave é conflito (o último branch venceria)
     state.dados_api = {"fonte": "api", "dados": "Resultados da API"}
-    state.fontes_consultadas.append("api")
 
 @task(timeout=15)
 def buscar_banco():
@@ -164,25 +174,24 @@ def buscar_banco():
     import time
     time.sleep(0.2)
     state.dados_banco = {"fonte": "banco", "dados": "Registros do BD"}
-    state.fontes_consultadas.append("banco")
 
 @task(timeout=5)
 def buscar_cache():
     """Busca em cache"""
     # Cache simulado
     state.dados_cache = {"fonte": "cache", "dados": "Dados em cache"}
-    state.fontes_consultadas.append("cache")
 
 # ── Pós-processamento ───────────────────────────────────────
 
 @task()
 def consolidar():
-    """Junta resultados de todas as fontes"""
+    """Junta resultados de todas as fontes — roda depois da barreira"""
     todos_dados = []
-    for fonte in state.fontes_consultadas:
-        chave = f"dados_{fonte}"
-        if state.get(chave):
-            todos_dados.append(state.get(chave))
+    for fonte in ("api", "banco", "cache"):
+        item = state.get(f"dados_{fonte}")
+        if item:
+            todos_dados.append(item)
+            state.fontes_consultadas.append(fonte)
 
     state.base_conhecimento = todos_dados
     state.total_fontes = len(todos_dados)

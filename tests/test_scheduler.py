@@ -283,9 +283,9 @@ class TestFlowTaskConfig:
             flaky()
             done()
 
-        resilient.run()
+        result = resilient.run()
         assert len(attempt_counts) == 3
-        assert state.ok
+        assert result.ok
 
     def test_timeout(self):
         import pytest
