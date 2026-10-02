@@ -10,7 +10,9 @@ class State:
     """Container mutável com criação automática de atributos aninhados."""
 
     def __init__(self, data: dict | None = None):
-        object.__setattr__(self, "_data", data or {})
+        # `data or {}` quebraria o aliasing de dicts vazios: State({}) criaria
+        # um dict novo e escritas em `state.nested[k] = v` se perderiam
+        object.__setattr__(self, "_data", {} if data is None else data)
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
@@ -141,8 +143,14 @@ class _StateProxy:
         return st == other
 
 
-def _set_state(st: State) -> None:
-    _current.set(st)
+def _set_state(st: State):
+    """Instala ``st`` no contexto atual. Retorna o token para restauração."""
+    return _current.set(st)
+
+
+def _reset_state(token) -> None:
+    """Restaura o valor anterior do contexto (token vindo de ``_set_state``)."""
+    _current.reset(token)
 
 
 def _get_state() -> State:

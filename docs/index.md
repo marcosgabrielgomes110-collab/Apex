@@ -61,9 +61,9 @@ meu_workflow.viz_svg("workflow.svg")
 
 | Item | Valor |
 |------|-------|
-| Versão | **0.1.0** |
+| Versão | **0.1.1** |
 | Licença | MIT |
 | Python | 3.11+ |
 | Dependências | **zero** |
-| Testes | **106** (pytest) |
+| Testes | **155** (pytest) |
 | Repositório | [github.com/marcosgabrielgomes110-collab/Apex](https://github.com/marcosgabrielgomes110-collab/Apex) |

@@ -12,9 +12,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/version-0.1.0-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.1.1-blueviolet" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/tests-106%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-155%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/dependencies-zero-lightgrey" alt="Dependencies">
 </p>
 
@@ -63,14 +63,21 @@ resultado = pipeline.run()
 print(resultado.resultado)  # 84
 ```
 
+Cada `run()` cria um state novo e o devolve — nada vaza entre execuções.
+Para rodar branches em paralelo, `with parallel():` (veja
+[graph.md](docs/graph.md#paralelismo)).
+
+O núcleo é zero-dependências; apenas a exportação PNG precisa de
+`pip install "apex-taskflow[png]"`.
+
 ---
 
 ## Filosofia
 
 - **Zero configuração** — decorators e funções padrão
-- **Implícito por design** — `state` global por execução sem injeção manual
-- **Tudo é uma task** — toda chamada de função vira nó no DAG
-- **Paralelismo automático** — tasks independentes rodam em paralelo
+- **Implícito por design** — `state` por execução via `contextvars`, sem injeção manual
+- **Tudo vira nó** — chamadas de task, `if`/`while`, atribuições e expressões viram nós do DAG
+- **Paralelismo explícito** — `with parallel():` roda branches isolados e faz merge ao final
 - **Visualização nativa** — ASCII, SVG, Mermaid, HTML, PNG
 
 ---

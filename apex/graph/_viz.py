@@ -44,6 +44,7 @@ def _node_kind_style(kind: str) -> dict:
         "loop": {"fill": "#1a1a2e", "stroke": "#4ecdc4", "rx": "12"},
         "parallel": {"fill": "#1a1a2e", "stroke": "#a855f7", "rx": "6", "stroke-dasharray": "4"},
         "subflow": {"fill": "#16213e", "stroke": "#0f3460", "rx": "6"},
+        "inline": {"fill": "#12121f", "stroke": "#5c6370", "rx": "3"},
     }
     return styles.get(kind, styles["task"])
 

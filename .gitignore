@@ -2,11 +2,10 @@
 __pycache__/
 *.py[codz]
 *$py.class
-.*
 # C extensions
 *.so
 token.md
-pyram_chatbot.svg
+apex_chatbot.svg
 
 # Distribution / packaging
 .Python

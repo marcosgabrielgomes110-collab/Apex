@@ -1,7 +1,7 @@
 """Demonstração do Apex.graph — motor de workflows.
 
 Uso:
-    python exemples/graph_demo.py
+    python examples/graph_demo.py
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -133,7 +133,7 @@ print("\n=== 6. Visualização chatbot ===")
 print(chatbot.viz())
 
 try:
-    chatbot.viz_svg("pyram_chatbot.svg")
-    print("SVG exportado: pyram_chatbot.svg")
+    chatbot.viz_svg("apex_chatbot.svg")
+    print("SVG exportado: apex_chatbot.svg")
 except Exception as e:
     print(f"(SVG skip: {e})")
