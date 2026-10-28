@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ._dag import DAG, Node, NodeConfig, build_dag
-from ._state import State, _set_state, _get_state
+from ._state import State, _set_state, _reset_state, _get_state
 
 MAX_LOOP_ITERATIONS = 100
 
@@ -64,11 +64,14 @@ class Flow:
         self._func = func
         self._name = name or func.__name__
         self._dag: DAG | None = None
+        self._dag_lock = threading.Lock()
         self._flow_dag = True
 
     def _ensure_dag(self) -> DAG:
         if self._dag is None:
-            self._dag = build_dag(self._func)
+            with self._dag_lock:
+                if self._dag is None:
+                    self._dag = build_dag(self._func)
         return self._dag
 
     def run(self, state: dict | None = None, *, cancel_event=None, **kwargs) -> State:
@@ -107,7 +110,7 @@ class Flow:
             data.update(kwargs)
             st = State(data)
 
-        _set_state(st)
+        token = _set_state(st)
         scheduler = _Scheduler(dag, st, cancel_event=cancel_event)
         result = RunResult(state=st)
 
@@ -126,6 +129,7 @@ class Flow:
             result.state = _get_state()
             result.results = dict(scheduler._results)
             result.duration = time.monotonic() - t0
+            _reset_state(token)
 
         return result
 

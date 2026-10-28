@@ -12,9 +12,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/version-0.1.0-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.2.0-blueviolet" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/tests-106%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/dependencies-zero-lightgrey" alt="Dependencies">
 </p>
 
@@ -65,6 +65,39 @@ print(resultado.resultado)  # 84
 
 ---
 
+## Execução detalhada e cancelamento
+
+```python
+from apex.graph import flow, task, state, CancelledError, RunResult
+import threading
+
+@task()
+def calcular():
+    return 42
+
+@flow
+def pipeline():
+    calcular()
+
+# run() continua retornando State
+resultado = pipeline.run()
+print(resultado.calcular)  # 42
+
+# run_detailed() retorna RunResult (state, results, duration, cancelled, errors)
+r = pipeline.run_detailed()
+print(r.results["calcular"], r.duration, r.cancelled, r.errors)
+
+# cancelamento cooperativo entre nós
+ev = threading.Event()
+ev.set()
+try:
+    pipeline.run(cancel_event=ev)  # CancelledError
+except CancelledError:
+    print("cancelado")
+```
+
+---
+
 ## Filosofia
 
 - **Zero configuração** — decorators e funções padrão
@@ -80,7 +113,7 @@ print(resultado.resultado)  # 84
 ```
 apex/
 ├── __init__.py          # from apex.graph import flow, task, state
-├── __version__.py       # 0.1.0
+├── __version__.py       # 0.2.0
 └── graph/
     ├── _state.py        # State + _StateProxy + contextvars
     ├── _dag.py          # AST walker → DAG + cycle detection

@@ -34,7 +34,7 @@
 |----------|-----------|
 | **`@flow`** | Decorator que analisa o AST e constrói um DAG automaticamente |
 | **`@task`** | Configura `retry` e `timeout` em tasks |
-| **`state`** | Estado global implícito via `contextvars`. Thread-safe. |
+| **`state`** | Estado global implícito via `contextvars`. Tasks paralelas rodam em snapshot isolado; escrita concorrente na mesma chave levanta erro. |
 | **`Flow.run()`** | Executa o DAG com paralelismo |
 | **`Flow.viz()`** | Visualiza em ASCII, SVG, Mermaid, HTML ou PNG |
 | **`parallel()`** | Context manager para paralelismo explícito |
@@ -125,6 +125,11 @@ def lenta():
 |-----------|--------|-----------|
 | `retry` | `0` | Tentativas extras com backoff exponencial |
 | `timeout` | `0` | Timeout em segundos (0 = sem timeout) |
+
+> **Semântica do timeout:** o `TimeoutError` é levantado no limite (`timeout` s).
+> A task não é interrompida (Python não mata threads) — a thread órfã continua
+> rodando até o fim, mas escreve em um snapshot descartado, então não corrompe o
+> estado do flow.
 
 O valor de retorno da task é mergido no state como `state.nome_da_task`:
 
@@ -232,6 +237,55 @@ flow.viz("png", path="f.png")   # PNG (requer cairosvg)
 
 ---
 
+## Cancelamento e execução detalhada
+
+`Flow.run()` continua retornando `State`. Para cenários de produção, existem duas
+adições:
+
+### `run(cancel_event=...)`
+
+Cancelamento **cooperativo** (verificado antes de iniciar cada nó e a cada
+iteração de loop). Não mata a task em execução.
+
+```python
+from apex.graph import flow, CancelledError
+import threading
+
+@flow
+def agente():
+    while not state.finalizado:
+        pensar()
+        agir()
+
+ev = threading.Event()
+try:
+    agente.run(cancel_event=ev)
+except CancelledError:
+    print("execução cancelada")  # ev.set() em outra thread
+```
+
+### `run_detailed()`
+
+Executa e retorna um `RunResult` em vez de levantar em erro/cancelamento:
+
+```python
+from apex.graph import flow, RunResult
+
+@flow
+def pipeline():
+    validar()
+    processar()
+
+r = pipeline.run_detailed()
+print(r.state)      # State final (ou parcial)
+print(r.results)    # {nome_do_nó: valor_de_retorno}
+print(r.duration)   # segundos
+print(r.cancelled)  # True se cancelado
+print(r.errors)     # lista de exceções das falhas
+```
+
+---
+
 ## Tratamento de erros
 
 ```
@@ -247,8 +301,11 @@ Debug de condições: `export APEX_DEBUG=1`
 | Símbolo | Tipo | Descrição |
 |---------|------|-----------|
 | `flow` | decorator | `@flow` ou `@flow(name="x")` |
-| `Flow.run(state, **kwargs)` | método | Executa, retorna `State` |
+| `Flow.run(state, *, cancel_event=None, **kwargs)` | método | Executa, retorna `State`; levanta `CancelledError` se cancelado |
+| `Flow.run_detailed(state, *, cancel_event=None, **kwargs)` | método | Executa, retorna `RunResult` (não levanta em erro/cancelamento) |
 | `Flow.viz(fmt, path)` | método | Visualiza DAG |
 | `task` | decorator | `@task(retry=N, timeout=S)` |
 | `state` | proxy | State global implícito |
 | `parallel` | context | `with parallel(): ...` |
+| `CancelledError` | exceção | Levantada quando `cancel_event` está setado |
+| `RunResult` | dataclass | `state`, `results`, `duration`, `cancelled`, `errors` |

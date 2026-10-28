@@ -98,38 +98,40 @@ class TestStateProxy:
 
 class TestStateContextVars:
     def test_isolation(self):
-        results = []
+        for _ in range(50):
+            results = []
 
-        def worker(val):
-            _set_state(State({"val": val}))
-            st = _get_state()
-            results.append(st.val)
+            def worker(val):
+                _set_state(State({"val": val}))
+                st = _get_state()
+                results.append(st.val)
 
-        t1 = threading.Thread(target=worker, args=(10,))
-        t2 = threading.Thread(target=worker, args=(20,))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        assert sorted(results) == [10, 20]
+            t1 = threading.Thread(target=worker, args=(10,))
+            t2 = threading.Thread(target=worker, args=(20,))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+            assert sorted(results) == [10, 20]
 
     def test_proxy_thread_isolation(self):
-        results = []
-        sp = _StateProxy()
+        for _ in range(50):
+            results = []
+            sp = _StateProxy()
 
-        def worker(val):
-            sp.val = val
-            import time
-            time.sleep(0.01)
-            results.append(sp.val)
+            def worker(val):
+                sp.val = val
+                import time
+                time.sleep(0.01)
+                results.append(sp.val)
 
-        t1 = threading.Thread(target=worker, args=("a",))
-        t2 = threading.Thread(target=worker, args=("b",))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        assert set(results) == {"a", "b"}
+            t1 = threading.Thread(target=worker, args=("a",))
+            t2 = threading.Thread(target=worker, args=("b",))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+            assert set(results) == {"a", "b"}
 
 
 class TestStateEdgeCases:

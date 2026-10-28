@@ -24,7 +24,7 @@ def _make_test_dag() -> DAG:
 
 class TestASCII:
     def test_empty(self):
-        assert ascii_tree(DAG()) == "(empty)"
+        assert ascii_tree(DAG()) == "(empty graph)"
 
     def test_single_node(self):
         dag = DAG()
@@ -65,7 +65,10 @@ class TestASCII:
 
 class TestSVG:
     def test_empty(self):
-        assert export_svg(DAG()) == ""
+        import xml.etree.ElementTree as ET
+        svg = export_svg(DAG())
+        ET.fromstring(svg)
+        assert "(empty graph)" in svg
 
     def test_valid_xml(self):
         import xml.etree.ElementTree as ET
@@ -104,6 +107,7 @@ class TestMermaid:
     def test_empty(self):
         out = export_mermaid(DAG())
         assert "flowchart" in out
+        assert "(empty graph)" in out
 
     def test_valid_syntax(self):
         dag = _make_test_dag()
@@ -135,7 +139,9 @@ class TestMermaid:
 
 class TestHTML:
     def test_empty(self):
-        assert export_html(DAG()) == ""
+        html = export_html(DAG())
+        assert "<!DOCTYPE html>" in html
+        assert "(empty graph)" in html
 
     def test_valid_html(self):
         dag = _make_test_dag()

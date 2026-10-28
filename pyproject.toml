@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apex-taskflow"
-version = "0.1.1"
+version = "0.2.0"
 description = "Zero-dependency Python workflow engine — DAG, @flow, @task, state"
 readme = "README.md"
 license = {text = "MIT"}

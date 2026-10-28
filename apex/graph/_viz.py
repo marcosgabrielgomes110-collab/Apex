@@ -8,6 +8,9 @@ NODE_W, NODE_H = 140, 50
 PAD = 40
 LEVEL_GAP = 60
 ROW_GAP = 24
+MAX_LABEL_CHARS = 40  # truncamento configurável do label (0 = sem truncar)
+CHAR_W = 7  # largura aproximada de um caractere monospace a 12px
+EMPTY_GRAPH = "(empty graph)"
 
 
 def _label(node):
@@ -47,18 +50,34 @@ def _escape_mermaid(text: str) -> str:
     return text.translate(_MERMAID_REPLACEMENTS)
 
 
-def _layout_grid(dag: DAG):
+def _truncate_label(text: str) -> str:
+    """Trunca o label com reticências, em vez de cortar em 18 chars fixos."""
+    if MAX_LABEL_CHARS <= 0 or len(text) <= MAX_LABEL_CHARS:
+        return text
+    return text[:MAX_LABEL_CHARS - 1] + "…"
+
+
+def _node_width(dag: DAG) -> int:
+    """Largura do nó calculada pelo maior label (com mínimo NODE_W)."""
+    longest = max((len(_label(n)) for n in dag.nodes.values()), default=0)
+    longest = min(longest, MAX_LABEL_CHARS) if MAX_LABEL_CHARS > 0 else longest
+    return max(NODE_W, longest * CHAR_W + 2 * 12)
+
+
+def _layout_grid(dag: DAG, node_w: int | None = None):
     levels = dag._levels()
+    if node_w is None:
+        node_w = _node_width(dag)
     positions: dict[str, tuple[float, float]] = {}
     for li, lvl in enumerate(levels):
-        x = PAD + li * (NODE_W + LEVEL_GAP)
+        x = PAD + li * (node_w + LEVEL_GAP)
         n = len(lvl)
         total_h = n * NODE_H + (n - 1) * ROW_GAP
         y_start = PAD + (max(0, 200 - total_h)) // 2 if n <= 3 else PAD
         for ni, name in enumerate(lvl):
             positions[name] = (x, y_start + ni * (NODE_H + ROW_GAP))
-    w = (len(levels) * (NODE_W + LEVEL_GAP) + PAD) if positions else 200
-    h = max(y + NODE_H for _, y in positions.values()) + PAD if positions else 200
+    w = (len(levels) * (node_w + LEVEL_GAP) + PAD) if positions else node_w + 2 * PAD
+    h = max(y + NODE_H for _, y in positions.values()) + PAD if positions else 2 * PAD + NODE_H
     return levels, positions, int(w), int(h)
 
 
@@ -78,7 +97,7 @@ def _node_kind_style(kind: str) -> dict:
 
 def ascii_tree(dag: DAG) -> str:
     if not dag.nodes or not dag.entry:
-        return "(empty)"
+        return EMPTY_GRAPH
     return _TreeBuilder(dag).render()
 
 
@@ -91,8 +110,14 @@ def export_ascii(dag: DAG) -> str:
 
 def export_svg(dag: DAG, path: str | None = None) -> str:
     if not dag.nodes:
-        return ""
-    levels, positions, width, height = _layout_grid(dag)
+        svg = _empty_svg()
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write(svg)
+        return svg
+    node_w = _node_width(dag)
+    levels, positions, width, height = _layout_grid(dag, node_w=node_w)
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">',
         "<style>",
@@ -107,7 +132,7 @@ def export_svg(dag: DAG, path: str | None = None) -> str:
             continue
         sx, sy = positions[edge.source]
         tx, ty = positions[edge.target]
-        x1, y1 = sx + NODE_W, sy + NODE_H // 2
+        x1, y1 = sx + node_w, sy + NODE_H // 2
         x2, y2 = tx, ty + NODE_H // 2
         cls = "edge-back" if edge.is_back_edge else "edge"
         if edge.is_back_edge:
@@ -133,11 +158,11 @@ def export_svg(dag: DAG, path: str | None = None) -> str:
         x, y = positions[name]
         style = _node_kind_style(node.kind)
         rect_attrs = " ".join(f'{k}="{v}"' for k, v in style.items())
-        label = _escape_xml(_label(node)[:18])
+        label = _escape_xml(_truncate_label(_label(node)))
         lines.append(
             f'<g class="node">'
-            f'<rect x="{x}" y="{y}" width="{NODE_W}" height="{NODE_H}" {rect_attrs}/>'
-            f'<text x="{x + NODE_W // 2}" y="{y + NODE_H // 2}">{label}</text>'
+            f'<rect x="{x}" y="{y}" width="{node_w}" height="{NODE_H}" {rect_attrs}/>'
+            f'<text x="{x + node_w // 2}" y="{y + NODE_H // 2}">{label}</text>'
             f"</g>"
         )
 
@@ -150,12 +175,21 @@ def export_svg(dag: DAG, path: str | None = None) -> str:
     return svg
 
 
+def _empty_svg() -> str:
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">'
+        '<text x="100" y="30" text-anchor="middle" dominant-baseline="central" '
+        'font-family="monospace" font-size="12" fill="#888">'
+        f'{_escape_xml(EMPTY_GRAPH)}</text></svg>'
+    )
+
+
 # ── Mermaid ────────────────────────────────────────────────────
 
 
 def export_mermaid(dag: DAG) -> str:
     if not dag.nodes:
-        return "flowchart TD\n"
+        return f'flowchart TD\n    N0["{EMPTY_GRAPH}"]\n'
 
     lines = ["flowchart TD"]
     node_ids: dict[str, str] = {}
@@ -195,8 +229,6 @@ def export_mermaid(dag: DAG) -> str:
 
 def export_html(dag: DAG, path: str | None = None) -> str:
     svg = export_svg(dag)
-    if not svg:
-        return ""
 
     html = (
         '<!DOCTYPE html>\n'

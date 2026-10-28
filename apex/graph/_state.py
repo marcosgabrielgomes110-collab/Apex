@@ -141,8 +141,12 @@ class _StateProxy:
         return st == other
 
 
-def _set_state(st: State) -> None:
-    _current.set(st)
+def _set_state(st: State):
+    return _current.set(st)
+
+
+def _reset_state(token) -> None:
+    _current.reset(token)
 
 
 def _get_state() -> State:
