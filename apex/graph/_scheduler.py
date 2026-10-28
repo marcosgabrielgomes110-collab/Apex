@@ -1,16 +1,39 @@
 from __future__ import annotations
 
-import os
+import inspect
 import threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ._dag import DAG, Node, NodeConfig, build_dag
 from ._state import State, _set_state, _get_state
 
 MAX_LOOP_ITERATIONS = 100
+
+
+class CancelledError(RuntimeError):
+    """Levantado quando a execução de um flow é cancelada cooperativamente."""
+
+
+@dataclass
+class RunResult:
+    """Resultado detalhado de uma execução de flow.
+
+    Atributos:
+        state: estado final (ou parcial, em caso de erro/cancelamento).
+        results: mapeamento nome-do-nó -> valor de retorno da task.
+        duration: duração da execução em segundos.
+        cancelled: True se o flow foi cancelado via cancel_event.
+        errors: lista de exceções das falhas encontradas.
+    """
+    state: State
+    results: dict = field(default_factory=dict)
+    duration: float = 0.0
+    cancelled: bool = False
+    errors: list = field(default_factory=list)
 
 
 class _EvalProxy:
@@ -22,7 +45,10 @@ class _EvalProxy:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        val = object.__getattribute__(self, "_data").get(name)
+        data = object.__getattribute__(self, "_data")
+        if name not in data:
+            raise AttributeError(f"State key '{name}' not found")
+        val = data[name]
         if isinstance(val, dict):
             return _EvalProxy(val)
         return val
@@ -45,7 +71,34 @@ class Flow:
             self._dag = build_dag(self._func)
         return self._dag
 
-    def run(self, state: dict | None = None, **kwargs) -> State:
+    def run(self, state: dict | None = None, *, cancel_event=None, **kwargs) -> State:
+        """Executa o flow e retorna o State final.
+
+        `cancel_event` (threading.Event, opcional) permite cancelamento
+        cooperativo: é verificado antes de iniciar cada nó; se estiver setado,
+        levanta CancelledError.
+        """
+        result = self._execute(state, cancel_event, kwargs)
+        if result.cancelled:
+            raise CancelledError("Execução do flow cancelada")
+        if result.errors:
+            raise result.errors[0]
+        return result.state
+
+    def run_detailed(self, state: dict | None = None, *, cancel_event=None, **kwargs) -> RunResult:
+        """Executa o flow e retorna um RunResult (sem levantar em erro/cancel).
+
+        Falhas de task são coletadas em `RunResult.errors`; cancelamento é
+        reportado em `RunResult.cancelled` em vez de levantar exceção.
+        """
+        return self._execute(state, cancel_event, kwargs)
+
+    def _execute(self, state, cancel_event, kwargs) -> RunResult:
+        if inspect.iscoroutinefunction(self._func):
+            raise TypeError(
+                f"async def não suportado; use def síncrono: '{self._func.__name__}'"
+            )
+        t0 = time.monotonic()
         dag = self._ensure_dag()
         if isinstance(state, State):
             st = state
@@ -55,15 +108,26 @@ class Flow:
             st = State(data)
 
         _set_state(st)
+        scheduler = _Scheduler(dag, st, cancel_event=cancel_event)
+        result = RunResult(state=st)
 
-        if not dag.nodes:
-            self._func()
-            return _get_state()
+        try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CancelledError("Execução do flow cancelada")
+            if not dag.nodes:
+                self._func()
+            else:
+                scheduler.run()
+        except CancelledError:
+            result.cancelled = True
+        except Exception as e:
+            result.errors.append(e)
+        finally:
+            result.state = _get_state()
+            result.results = dict(scheduler._results)
+            result.duration = time.monotonic() - t0
 
-        scheduler = _Scheduler(dag, st)
-        scheduler.run()
-
-        return _get_state()
+        return result
 
     def viz(self, fmt: str = "ascii", path: str | None = None):
         from ._viz import render
@@ -92,16 +156,23 @@ class Flow:
 
 
 class _Scheduler:
-    def __init__(self, dag: DAG, state: State):
+    def __init__(self, dag: DAG, state: State, cancel_event=None):
         self._dag = dag
         self._state = state
         self._executed: set[str] = set()
         self._blocked: set[str] = set()
+        self._cancel_event = cancel_event
+        self._results: dict[str, Any] = {}
+
+    def _check_cancel(self) -> None:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise CancelledError("Execução do flow cancelada")
 
     def run(self) -> None:
         levels = self._dag._levels()
 
         for level in levels:
+            self._check_cancel()
             parallel_group = []
             for node_name in level:
                 if node_name in self._executed or node_name in self._blocked:
@@ -123,6 +194,7 @@ class _Scheduler:
                     self._run_parallel_group(parallel_group)
 
     def _run_by_name(self, node_name: str) -> None:
+        self._check_cancel()
         if node_name in self._executed or node_name in self._blocked:
             return
         node = self._dag.nodes.get(node_name)
@@ -178,12 +250,17 @@ class _Scheduler:
                 time.sleep(min(2 ** attempt, 60))
 
         if return_value is not None and node.fn is not None and node.kind != "subflow":
-            func_name = getattr(
-                node.fn, '__name__',
-                node.name.rsplit("_", 1)[0] if "_" in node.name else node.name,
-            )
+            func_name = node.name
+            if func_name in target:
+                warnings.warn(
+                    f"Retorno da task '{func_name}' sobrescreveu chave de estado "
+                    f"pré-existente com o mesmo nome",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
             setattr(target, func_name, return_value)
 
+        self._results[node_name] = return_value
         self._executed.add(node_name)
 
     def _run_timed(self, invoke, target: State, timeout: float, flow_tag: str):
@@ -276,6 +353,7 @@ class _Scheduler:
     def _run_loop(self, node: Node) -> None:
         iteration = 0
         while self._evaluate(node.condition or "True"):
+            self._check_cancel()
             if iteration >= MAX_LOOP_ITERATIONS:
                 raise RuntimeError(
                     f"Loop '{node.name}' excedeu limite de {MAX_LOOP_ITERATIONS} iterações"
@@ -298,11 +376,10 @@ class _Scheduler:
         try:
             return bool(eval(condition, ns, {}))
         except Exception as exc:
-            if os.environ.get("APEX_DEBUG"):
-                warnings.warn(
-                    f"Condition eval failed: {condition!r} -> {type(exc).__name__}: {exc}"
-                )
-            return False
+            raise RuntimeError(
+                f"Falha ao avaliar condição '{condition}': "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
     def _run_parallel(self, node: Node) -> None:
         if node.body_nodes:

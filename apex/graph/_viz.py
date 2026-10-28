@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from xml.sax.saxutils import escape as _escape_xml
+
 from ._dag import DAG
 
 NODE_W, NODE_H = 140, 50
@@ -20,6 +22,29 @@ def _label(node):
     elif node.kind == "parallel":
         return "║ parallel ║"
     return label
+
+
+# Caracteres que quebram a sintaxe de flowchart do Mermaid quando usados
+# dentro de labels. Substituídos por equivalentes visuais seguros.
+_MERMAID_REPLACEMENTS = str.maketrans({
+    '"': "'",
+    "#": "♯",
+    ";": ",",
+    "[": "〔",
+    "]": "〕",
+    "(": "（",
+    ")": "）",
+    "|": "¦",
+    "{": "｛",
+    "}": "｝",
+    "\n": " ",
+    "\\": "/",
+})
+
+
+def _escape_mermaid(text: str) -> str:
+    """Sanitiza um label para uso seguro dentro de nó Mermaid."""
+    return text.translate(_MERMAID_REPLACEMENTS)
 
 
 def _layout_grid(dag: DAG):
@@ -108,17 +133,19 @@ def export_svg(dag: DAG, path: str | None = None) -> str:
         x, y = positions[name]
         style = _node_kind_style(node.kind)
         rect_attrs = " ".join(f'{k}="{v}"' for k, v in style.items())
+        label = _escape_xml(_label(node)[:18])
         lines.append(
             f'<g class="node">'
             f'<rect x="{x}" y="{y}" width="{NODE_W}" height="{NODE_H}" {rect_attrs}/>'
-            f'<text x="{x + NODE_W // 2}" y="{y + NODE_H // 2}">{_label(node)[:18]}</text>'
+            f'<text x="{x + NODE_W // 2}" y="{y + NODE_H // 2}">{label}</text>'
             f"</g>"
         )
 
     lines.append("</svg>")
     svg = "\n".join(lines)
     if path:
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
             f.write(svg)
     return svg
 
@@ -137,18 +164,17 @@ def export_mermaid(dag: DAG) -> str:
         nid = f"N{i}"
         node_ids[name] = nid
         node = dag.nodes[name]
-        label = _label(node)
-        safe_label = label.replace('"', "'").replace("\n", " ")
+        label = _escape_mermaid(_label(node))
         if node.kind == "conditional":
-            lines.append(f'    {nid}{{"{safe_label}"}}')
+            lines.append(f'    {nid}{{"{label}"}}')
         elif node.kind == "loop":
-            lines.append(f'    {nid}{{"{safe_label}"}}')
+            lines.append(f'    {nid}{{"{label}"}}')
         elif node.kind == "parallel":
-            lines.append(f'    {nid}["{safe_label}"]')
+            lines.append(f'    {nid}["{label}"]')
         elif node.kind == "subflow":
-            lines.append(f'    {nid}["{safe_label}"]')
+            lines.append(f'    {nid}["{label}"]')
         else:
-            lines.append(f'    {nid}["{safe_label}"]')
+            lines.append(f'    {nid}["{label}"]')
 
     for edge in dag.edges:
         src = node_ids.get(edge.source)
@@ -200,7 +226,7 @@ def export_html(dag: DAG, path: str | None = None) -> str:
     )
 
     if path:
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(html)
     return html
 
@@ -229,7 +255,7 @@ def render(dag: DAG, fmt: str = "ascii", path: str | None = None) -> str | None:
     if fmt == "ascii":
         result = ascii_tree(dag)
         if path:
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(result)
         return result
     elif fmt == "svg":
@@ -237,7 +263,7 @@ def render(dag: DAG, fmt: str = "ascii", path: str | None = None) -> str | None:
     elif fmt == "mermaid":
         result = export_mermaid(dag)
         if path:
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(result)
         return result
     elif fmt == "html":

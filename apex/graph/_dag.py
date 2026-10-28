@@ -189,6 +189,11 @@ def _handle_call(call: ast.Call, ctx: _BuildContext, last: str | None) -> str:
             f"Ensure the function is defined at module level or in an enclosing scope."
         )
 
+    if inspect.iscoroutinefunction(fn):
+        raise TypeError(
+            f"async def não suportado; use def síncrono: '{name}'"
+        )
+
     # detecta se é subflow
     flow_dag = getattr(fn, '_flow_dag', None)
     kind: Literal["task", "conditional", "loop", "parallel", "subflow"] = "subflow" if flow_dag else "task"

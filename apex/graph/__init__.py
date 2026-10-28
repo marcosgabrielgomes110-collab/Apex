@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ._scheduler import Flow, flow, task, parallel
+from ._scheduler import Flow, flow, task, parallel, CancelledError, RunResult
 from ._state import state
 
 __all__ = [
@@ -9,4 +9,6 @@ __all__ = [
     "task",
     "parallel",
     "state",
+    "CancelledError",
+    "RunResult",
 ]
